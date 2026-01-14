@@ -49,6 +49,7 @@ typedef struct __attribute__ ((__packed__)) lsm6DContextData_s {
 #define LSM6DSO_CHIP_ID 0x6C
 #define LSM6DSL_CHIP_ID 0x6A
 #define LSM6DS3_CHIP_ID 0x69
+#define LSM6DSV16X_CHIP_ID 0x70
 
 static uint8_t lsm6dID = 0x6C;
 
@@ -85,8 +86,94 @@ static uint8_t getLsmDlpfBandwidth(gyroDev_t *gyro)
     return 0;
 }
 
+static void lsm6dsv16xConfig(gyroDev_t *gyro)
+{
+    busDevice_t *dev = gyro->busDev;
+    const gyroFilterAndRateConfig_t *config = mpuChooseGyroConfig(gyro->lpf, 1000000 / gyro->requestedSampleIntervalUs);
+    gyro->sampleRateIntervalUs = 1000000 / config->gyroRateHz;
+
+    busSetSpeed(dev, BUS_SPEED_INITIALIZATION);
+
+    // 复位设备（等待100ms后继续配置）
+    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL3_C, LSM6DXX_MASK_CTRL3_C_RESET, BIT(0), 100);
+
+    // 配置数据就绪脉冲模式
+    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_COUNTER_BDR1, LSM6DXX_MASK_COUNTER_BDR1, LSM6DXX_VAL_COUNTER_BDR1_DDRY_PM, 0);
+
+    // 配置中断引脚1为陀螺仪数据就绪
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_INT1_CTRL, LSM6DXX_VAL_INT1_CTRL, 1);
+
+    // 禁用中断引脚2
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_INT2_CTRL, LSM6DXX_VAL_INT2_CTRL, 1);
+
+    // 配置加速度计 - LSM6DSV16X 特定
+    // LSM6DSV16X CTRL1_XL 寄存器布局:
+    //   bit[7:4] = ODR_XL[3:0] (输出数据率)
+    //   bit[3:2] = FS[1:0]_XL  (量程: 00=2g, 01=4g, 10=8g, 11=16g)
+    //   bit[1]   = LPF2_XL_EN  (LPF2使能)
+    //   bit[0]   = 保留
+    // 960Hz ODR (0x09), 16G scale (FS=11), LPF2 enabled
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL1_XL, 
+                         (LSM6DSV16X_VAL_CTRL1_XL_ODR960 << 4) |  // ODR 在 bit[7:4]
+                         (LSM6DSV16X_VAL_CTRL1_XL_16G << 2) |     // FS_XL 在 bit[3:2]
+                         (LSM6DXX_VAL_CTRL1_XL_LPF2 << 1), 1);    // LPF2_XL_EN 在 bit[1]
+
+    // 配置陀螺仪 - LSM6DSV16X 特定
+    // LSM6DSV16X CTRL2_G 寄存器布局:
+    //   bit[7:4] = ODR_G[3:0]  (输出数据率)
+    //   bit[3:1] = FS[2:0]_G   (量程: 000=250dps, 001=500dps, 010=1000dps, 011=2000dps, 100=4000dps)
+    //   bit[0]   = 保留
+    // 注意: LSM6DSV16X 的 FS_G 是 3 位，位于 bit[3:1]，需要左移 1 位！
+    // 7680Hz ODR (0x0B), 2000dps scale (FS=011)
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL2_G, 
+                         (LSM6DSV16X_VAL_CTRL2_G_ODR7680 << 4) |  // ODR 在 bit[7:4]
+                         (LSM6DSV16X_VAL_CTRL2_G_2000DPS << 1), 1); // FS_G 在 bit[3:1]，左移1位！
+
+    // 配置控制寄存器3
+    // 读取时锁存LSB/MSB；中断引脚高电平有效；中断引脚推挽输出；4线SPI模式；使能自动地址递增
+    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL3_C, LSM6DXX_MASK_CTRL3_C, 
+                             (LSM6DXX_VAL_CTRL3_C_H_LACTIVE | 
+                              LSM6DXX_VAL_CTRL3_C_PP_OD | 
+                              LSM6DXX_VAL_CTRL3_C_SIM | 
+                              LSM6DXX_VAL_CTRL3_C_IF_INC), 1);
+
+    // 配置控制寄存器4
+    // 使能加速度计高性能模式；使能陀螺仪LPF1
+    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL4_C, LSM6DXX_MASK_CTRL4_C, 
+                             (LSM6DXX_VAL_CTRL4_C_DRDY_MASK | 
+                              LSM6DXX_VAL_CTRL4_C_I2C_DISABLE | 
+                              LSM6DXX_VAL_CTRL4_C_LPF1_SEL_G), 1);
+
+    // 配置控制寄存器6 - LSM6DSV16X 没有 XL_HM_MODE 位
+    // 使用 LSM6DSL 掩码（无 XL_HM_MODE）；根据 gyro_hardware_lpf 设置陀螺仪 LPF1 截止频率
+    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL6_C, LSM6DSL_MASK_CTRL6_C, getLsmDlpfBandwidth(gyro), 1);
+
+    // 配置控制寄存器7 - LSM6DSV16X
+    // 注意: LSM6DSV16X 的 CTRL7_G 位布局可能与 LSM6DSOX 不同
+    // 暂时禁用陀螺仪高通滤波器，避免可能的漂移问题
+    // bit 7: G_HM_MODE = 0 (启用高性能模式)
+    // bit 6: HP_EN_G = 0 (禁用高通滤波器)
+    // bit 5:4: HPM[1:0]_G = 00 (HPF截止频率16mHz，但HPF已禁用)
+    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL7_G, LSM6DXX_MASK_CTRL7_G, 
+                             LSM6DXX_VAL_CTRL7_G_HPM_G_16, 1);  // 只设置HPM，不启用HP_EN_G
+
+    // 配置控制寄存器9 - 禁用 I2C 和 I3C 接口
+    // LSM6DSV16X 使用 bit 0 而不是 bit 1 来禁用 I2C/I3C
+    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL9_XL, LSM6DSV16X_MASK_CTRL9_XL, 
+                             LSM6DSV16X_VAL_CTRL9_I2C_I3C_DISABLE, 1);
+
+    busSetSpeed(dev, BUS_SPEED_FAST);
+}
+
 static void lsm6dxxConfig(gyroDev_t *gyro)
 { 
+    // Dispatch to chip-specific configuration based on detected chip ID
+    if (lsm6dID == LSM6DSV16X_CHIP_ID) {
+        lsm6dsv16xConfig(gyro);
+        return;
+    }
+
+    // LSM6DSO/LSM6DSL configuration
     busDevice_t * dev = gyro->busDev;
     const gyroFilterAndRateConfig_t * config = mpuChooseGyroConfig(gyro->lpf, 1000000 / gyro->requestedSampleIntervalUs);
     gyro->sampleRateIntervalUs = 1000000 / config->gyroRateHz;
@@ -154,6 +241,7 @@ static bool lsm6dxxDetect(busDevice_t * dev)
         switch (tmp) {
             case LSM6DSO_CHIP_ID:
             case LSM6DSL_CHIP_ID: 
+            case LSM6DSV16X_CHIP_ID:
                  lsm6dID = tmp;
                 // Compatible chip detected
                 return true;
@@ -184,9 +272,18 @@ static bool lsm6dxxAccRead(accDev_t *acc)
     if (!ack) {
         return false;
     }
-    acc->ADCRaw[X] = (float) int16_val_little_endian(data, 0);
-    acc->ADCRaw[Y] = (float) int16_val_little_endian(data, 1);
-    acc->ADCRaw[Z] = (float) int16_val_little_endian(data, 2);
+    
+    // LSM6DSV16X 的加速度计轴向与陀螺仪不同，需要交换 X/Y 轴
+    if (lsm6dID == LSM6DSV16X_CHIP_ID) {
+        // 交换 X 和 Y 轴以匹配陀螺仪的轴向
+        acc->ADCRaw[X] = (float) int16_val_little_endian(data, 1);  // Y -> X
+        acc->ADCRaw[Y] = (float) int16_val_little_endian(data, 0);  // X -> Y
+        acc->ADCRaw[Z] = (float) int16_val_little_endian(data, 2);
+    } else {
+        acc->ADCRaw[X] = (float) int16_val_little_endian(data, 0);
+        acc->ADCRaw[Y] = (float) int16_val_little_endian(data, 1);
+        acc->ADCRaw[Z] = (float) int16_val_little_endian(data, 2);
+    }
     return true; 
 }
 

@@ -87,6 +87,32 @@ typedef enum {
     LSM6DXX_VAL_CTRL7_G_HPM_G_260 = 0x02,     // (bits 5:4) gyro HPF cutoff 260mHz
     LSM6DXX_VAL_CTRL7_G_HPM_G_1040 = 0x03,    // (bits 5:4) gyro HPF cutoff 1.04Hz
     LSM6DXX_VAL_CTRL9_XL_I3C_DISABLE = BIT(1),// (bit 1) disable I3C interface
+
+    // LSM6DSV16X 特定的加速度计量程值
+    // LSM6DSV16X: FS[1:0]_XL: 00=2g, 01=4g, 10=8g, 11=16g
+    LSM6DSV16X_VAL_CTRL1_XL_16G = 0x03,      // 加速度计 16G 量程 (LSM6DSV16X)
+
+    // LSM6DSV16X 特定的陀螺仪 ODR 值（与 LSM6DSO 完全不同）
+    // LSM6DSV16X 陀螺仪 ODR: 0x0B=7680Hz, 0x0A=3840Hz, 0x09=1920Hz, 0x08=960Hz
+    LSM6DSV16X_VAL_CTRL2_G_ODR7680 = 0x0B,   // 陀螺仪 7680Hz ODR
+    LSM6DSV16X_VAL_CTRL2_G_ODR3840 = 0x0A,   // 陀螺仪 3840Hz ODR
+    LSM6DSV16X_VAL_CTRL2_G_ODR1920 = 0x09,   // 陀螺仪 1920Hz ODR
+    LSM6DSV16X_VAL_CTRL2_G_ODR960 = 0x08,    // 陀螺仪 960Hz ODR
+
+    // LSM6DSV16X 特定的陀螺仪量程值
+    // LSM6DSV16X CTRL2_G 寄存器: FS[2:0]_G 在 bit[3:1]，需要左移1位
+    // FS[2:0]_G: 000=250dps, 001=500dps, 010=1000dps, 011=2000dps, 100=4000dps
+    LSM6DSV16X_VAL_CTRL2_G_2000DPS = 0x03,   // 陀螺仪 2000dps 量程 (值=011)
+
+    // LSM6DSV16X 特定的加速度计 ODR 值
+    // LSM6DSV16X 加速度计 ODR: 0x0B=3840Hz, 0x0A=1920Hz, 0x09=960Hz, 0x08=480Hz
+    LSM6DSV16X_VAL_CTRL1_XL_ODR3840 = 0x0B,  // 加速度计 3840Hz ODR
+    LSM6DSV16X_VAL_CTRL1_XL_ODR1920 = 0x0A,  // 加速度计 1920Hz ODR
+    LSM6DSV16X_VAL_CTRL1_XL_ODR960 = 0x09,   // 加速度计 960Hz ODR
+    LSM6DSV16X_VAL_CTRL1_XL_ODR480 = 0x08,   // 加速度计 480Hz ODR
+
+    // LSM6DSV16X CTRL9 - 同时禁用 I2C 和 I3C（使用 bit 0 而不是 bit 1）
+    LSM6DSV16X_VAL_CTRL9_I2C_I3C_DISABLE = BIT(0), // bit 0 禁用 I2C 和 I3C
 } lsm6dxxConfigValues_e;
 
 // LSM6DXX register configuration bit masks
@@ -99,6 +125,7 @@ typedef enum {
     LSM6DXX_MASK_CTRL7_G = 0x70,         // 0b01110000
     LSM6DXX_MASK_CTRL9_XL = 0x02,        // 0b00000010
     LSM6DSL_MASK_CTRL6_C = 0x13,         // 0b00010011
+    LSM6DSV16X_MASK_CTRL9_XL = 0x01,     // 0b00000001 (bit 0 for LSM6DSV16X I2C/I3C disable)
 
 } lsm6dxxConfigMasks_e;
 
