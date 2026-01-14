@@ -273,17 +273,11 @@ static bool lsm6dxxAccRead(accDev_t *acc)
         return false;
     }
     
-    // LSM6DSV16X 的加速度计轴向与陀螺仪不同，需要交换 X/Y 轴
-    if (lsm6dID == LSM6DSV16X_CHIP_ID) {
-        // 交换 X 和 Y 轴以匹配陀螺仪的轴向
-        acc->ADCRaw[X] = (float) int16_val_little_endian(data, 1);  // Y -> X
-        acc->ADCRaw[Y] = (float) int16_val_little_endian(data, 0);  // X -> Y
-        acc->ADCRaw[Z] = (float) int16_val_little_endian(data, 2);
-    } else {
-        acc->ADCRaw[X] = (float) int16_val_little_endian(data, 0);
-        acc->ADCRaw[Y] = (float) int16_val_little_endian(data, 1);
-        acc->ADCRaw[Z] = (float) int16_val_little_endian(data, 2);
-    }
+    // 加速度计不进行轴向交换
+    acc->ADCRaw[X] = (float) int16_val_little_endian(data, 0);
+    acc->ADCRaw[Y] = (float) int16_val_little_endian(data, 1);
+    acc->ADCRaw[Z] = (float) int16_val_little_endian(data, 2);
+    
     return true; 
 }
 
@@ -294,6 +288,8 @@ static bool lsm6dxxGyroRead(gyroDev_t *gyro)
     if (!ack) {
         return false;
     }
+    
+    // 陀螺仪不需要轴向交换
     gyro->gyroADCRaw[X] = (float) int16_val_little_endian(data, 0);
     gyro->gyroADCRaw[Y] = (float) int16_val_little_endian(data, 1);
     gyro->gyroADCRaw[Z] = (float) int16_val_little_endian(data, 2);
@@ -320,6 +316,7 @@ bool lsm6dGyroDetect(gyroDev_t *gyro)
     gyro->readFn = lsm6dxxGyroRead;
     gyro->intStatusFn = gyroCheckDataReady;
     gyro->scale = 1.0f / 16.4f; // 2000 dps
+    gyro->gyroAlign = gyro->busDev->param;  // 使用 target.h 中定义的对齐设置
     return true;
 
 }
