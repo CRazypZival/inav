@@ -104,8 +104,11 @@ static void lsm6dsv16xConfig(gyroDev_t *gyro)
 
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL1_XL, 
                          (LSM6DSV16X_VAL_CTRL1_XL_ODR960 << 4) |  // ODR 在 bit[7:4]
-                         (LSM6DSV16X_VAL_CTRL1_XL_16G << 2) |     // FS_XL 在 bit[3:2]，值=11(0x03)
                          (LSM6DXX_VAL_CTRL1_XL_LPF2 << 1), 1);    // LPF2_XL_EN 在 bit[1]
+
+    // LSM6DSV16X: FS_XL 在 CTRL8 (17h) 的 bit[1:0]，而不是 CTRL1_XL
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL8_XL, 
+                         LSM6DSV16X_VAL_CTRL1_XL_16G, 1);         // FS_XL = 11 (±16g)
 
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL2_G, 
                          (LSM6DSV16X_VAL_CTRL2_G_ODR7680 << 4) |  // ODR 在 bit[7:4]
@@ -232,8 +235,7 @@ static void lsm6dxxSpiGyroInit(gyroDev_t *gyro)
 
 static void lsm6dxxSpiAccInit(accDev_t *acc)
 {
-    // sensor is configured during gyro init
-    acc->acc_1G = 512 * 4;   // 16G sensor scale
+    acc->acc_1G = 2048;   // 16G sensor scale
 }
 
 static bool lsm6dxxAccRead(accDev_t *acc)
@@ -286,7 +288,7 @@ bool lsm6dGyroDetect(gyroDev_t *gyro)
     gyro->initFn = lsm6dxxSpiGyroInit;
     gyro->readFn = lsm6dxxGyroRead;
     gyro->intStatusFn = gyroCheckDataReady;
-    gyro->scale = 1.0f / 16.4f; // 2000 dps
+    gyro->scale = 1.0f / 28.509f; // 2000 dps: 70 mdps/LSB (from datasheet Table 3)
     gyro->gyroAlign = gyro->busDev->param;  // 使用 target.h 中定义的对齐设置
     return true;
 
