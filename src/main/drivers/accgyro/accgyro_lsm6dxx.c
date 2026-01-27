@@ -94,43 +94,51 @@ static void lsm6dsv16xConfig(gyroDev_t *gyro)
 
     busSetSpeed(dev, BUS_SPEED_INITIALIZATION);
 
-    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL3_C, LSM6DXX_MASK_CTRL3_C_RESET, BIT(0), 100);
+    // Software reset
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL3_C, BIT(0), 100);
 
-    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_COUNTER_BDR1, LSM6DXX_MASK_COUNTER_BDR1, LSM6DXX_VAL_COUNTER_BDR1_DDRY_PM, 0);
+    // Enable Block Data Update (BDU) and auto-increment address
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL3_C, 
+                         BIT(6) |  // BDU - Block Data Update
+                         BIT(2), 1); // IF_INC - Auto-increment address
 
-    lsm6dxxWriteRegister(dev, LSM6DXX_REG_INT1_CTRL, LSM6DXX_VAL_INT1_CTRL, 1);
+    // Select high-accuracy ODR mode 1 (HAODR_SEL = 01)
+    // This enables ODR values: 15.625Hz, 31.25Hz, 62.5Hz, 125Hz, 250Hz, 500Hz, 1000Hz, 2000Hz, 4000Hz, 8000Hz
+    lsm6dxxWriteRegister(dev, 0x62, 0x01, 1);  // HAODR_CFG register, HAODR_SEL = 01
 
-    lsm6dxxWriteRegister(dev, LSM6DXX_REG_INT2_CTRL, LSM6DXX_VAL_INT2_CTRL, 1);
-
+    // Enable accelerometer in high-accuracy mode with ODR = 1000Hz (value 9 in HAODR_MODE1)
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL1_XL, 
-                         (LSM6DSV16X_VAL_CTRL1_XL_ODR960 << 4) |  // ODR 在 bit[7:4]
-                         (LSM6DXX_VAL_CTRL1_XL_LPF2 << 1), 1);    // LPF2_XL_EN 在 bit[1]
+                         (0x01 << 4) |  // OP_MODE_XL = 01 (HIGH_ACCURACY)
+                         (0x09 << 0), 1); // ODR_XL = 1000Hz in HAODR_MODE1
 
-    // LSM6DSV16X: FS_XL 在 CTRL8 (17h) 的 bit[1:0]，而不是 CTRL1_XL
-    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL8_XL, 
-                         LSM6DSV16X_VAL_CTRL1_XL_16G, 1);         // FS_XL = 11 (±16g)
-
+    // Enable gyroscope in high-accuracy mode with ODR = 8000Hz (value 12 in HAODR_MODE1)
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL2_G, 
-                         (LSM6DSV16X_VAL_CTRL2_G_ODR7680 << 4) |  // ODR 在 bit[7:4]
-                         (LSM6DSV16X_VAL_CTRL2_G_2000DPS << 1), 1); // FS_G 在 bit[3:1]，左移1位！
+                         (0x01 << 4) |  // OP_MODE_G = 01 (HIGH_ACCURACY)
+                         (0x0C << 0), 1); // ODR_G = 8000Hz in HAODR_MODE1
 
-    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL3_C, LSM6DXX_MASK_CTRL3_C, 
-                             (LSM6DXX_VAL_CTRL3_C_H_LACTIVE | 
-                              LSM6DXX_VAL_CTRL3_C_PP_OD | 
-                              LSM6DXX_VAL_CTRL3_C_SIM | 
-                              LSM6DXX_VAL_CTRL3_C_IF_INC), 1);
+    // Set accelerometer full-scale to ±16g in CTRL8
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL8_XL, 
+                         0x03, 1);  // FS_XL = 11 (±16g)
 
-    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL4_C, LSM6DXX_MASK_CTRL4_C, 
-                             (LSM6DXX_VAL_CTRL4_C_DRDY_MASK | 
-                              LSM6DXX_VAL_CTRL4_C_LPF1_SEL_G), 1);
+    // Set gyroscope full-scale to ±2000dps in CTRL6
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL6_C, 
+                         0x04, 1);  // FS_G = 0100 (±2000dps)
 
-    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL6_C, LSM6DSL_MASK_CTRL6_C, getLsmDlpfBandwidth(gyro), 1);
+    // Enable gyroscope LPF1 filter
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL7_G, 
+                         BIT(0), 1);  // LPF1_G_EN
 
-    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL7_G, LSM6DXX_MASK_CTRL7_G, 
-                             LSM6DXX_VAL_CTRL7_G_HPM_G_16, 1);  // 只设置HPM，不启用HP_EN_G
+    // Configure interrupt: data ready pulsed mode
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL4_C, 
+                         BIT(1), 1);  // DRDY_PULSED
 
-    lsm6dxxWriteRegisterBits(dev, LSM6DXX_REG_CTRL9_XL, LSM6DSV16X_MASK_CTRL9_XL, 
-                             LSM6DSV16X_VAL_CTRL9_I2C_I3C_DISABLE, 1);
+    // Enable INT1 for gyro data ready
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_INT1_CTRL, 
+                         BIT(1), 1);  // INT1_DRDY_G
+
+    // Disable I2C/I3C interface (SPI only)
+    lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL9_XL, 
+                         BIT(0), 1);  // I2C_I3C_DISABLE
 
     busSetSpeed(dev, BUS_SPEED_FAST);
 }
