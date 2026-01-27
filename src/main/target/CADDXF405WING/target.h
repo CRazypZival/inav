@@ -72,13 +72,13 @@
 // TF Card
 #define USE_SPI_DEVICE_3
 #define SPI3_SCK_PIN            PB3
-#define SPI3_MISO_PIN           PC14  
-#define SPI3_MOSI_PIN           PB4  
+#define SPI3_MISO_PIN           PB4  
+#define SPI3_MOSI_PIN           PB5  
 /*** SD card ***/
 #define USE_SDCARD
 #define USE_SDCARD_SPI
 #define SDCARD_SPI_BUS          BUS_SPI3
-#define SDCARD_CS_PIN           PB5
+#define SDCARD_CS_PIN           PC14
 #define ENABLE_BLACKBOX_LOGGING_ON_SDCARD_BY_DEFAULT
 
 #define USE_I2C
