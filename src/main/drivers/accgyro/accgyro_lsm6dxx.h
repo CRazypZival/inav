@@ -73,8 +73,8 @@ typedef enum {
     LSM6DXX_VAL_CTRL3_C_PP_OD = 0,            // (bit 4) interrupt pins push/pull
     LSM6DXX_VAL_CTRL3_C_SIM = 0,              // (bit 3) SPI 4-wire interface mode
     LSM6DXX_VAL_CTRL3_C_IF_INC = BIT(2),      // (bit 2) auto-increment address for burst reads
-    LSM6DXX_VAL_CTRL4_C_DRDY_MASK = BIT(3),   // (bit 3) data ready interrupt mask
-    LSM6DXX_VAL_CTRL4_C_I2C_DISABLE = BIT(2), // (bit 2) disable I2C interface
+    LSM6DXX_VAL_CTRL4_C_DRDY_MASK = BIT(6),   // (bit 6) 屏蔽数据就绪信号直至滤波器稳定
+    LSM6DXX_VAL_CTRL4_C_I2C_DISABLE = 0,      // LSM6DSV16X中无此位，I2C禁用通过CTRL9_XL配置
     LSM6DXX_VAL_CTRL4_C_LPF1_SEL_G = BIT(1),  // (bit 1) enable gyro LPF1
     LSM6DXX_VAL_CTRL6_C_XL_HM_MODE = 0,       // (bit 4) enable accelerometer high performance mode
     LSM6DXX_VAL_CTRL6_C_FTYPE_300HZ = 0x00,   // (bits 2:0) gyro LPF1 cutoff 335.5Hz
@@ -118,9 +118,9 @@ typedef enum {
 // LSM6DXX register configuration bit masks
 typedef enum {
     LSM6DXX_MASK_COUNTER_BDR1 = 0x80,    // 0b10000000
-    LSM6DXX_MASK_CTRL3_C = 0x3C,         // 0b00111100
+    LSM6DXX_MASK_CTRL3_C = 0x3C,         // 0b00111100 (bit5 H_LACTIVE, bit4 PP_OD, bit3 SIM, bit2 IF_INC)
     LSM6DXX_MASK_CTRL3_C_RESET = BIT(0), // 0b00000001
-    LSM6DXX_MASK_CTRL4_C = 0x0E,         // 0b00001110
+    LSM6DXX_MASK_CTRL4_C = 0x42,         // 0b01000010 (bit6 DRDY_MASK, bit1 LPF1_SEL_G)
     LSM6DXX_MASK_CTRL6_C = 0x17,         // 0b00010111
     LSM6DXX_MASK_CTRL7_G = 0x70,         // 0b01110000
     LSM6DXX_MASK_CTRL9_XL = 0x02,        // 0b00000010
