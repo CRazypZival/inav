@@ -102,25 +102,29 @@ static void lsm6dsv16xConfig(gyroDev_t *gyro)
                          BIT(6) |  // BDU - Block Data Update
                          BIT(2), 1); // IF_INC - Auto-increment address
 
-    // Select high-accuracy ODR mode 1 (HAODR_SEL = 01)
-    // This enables ODR values: 15.625Hz, 31.25Hz, 62.5Hz, 125Hz, 250Hz, 500Hz, 1000Hz, 2000Hz, 4000Hz, 8000Hz
-    lsm6dxxWriteRegister(dev, 0x62, 0x01, 1);  // HAODR_CFG register, HAODR_SEL = 01
+    // Disable HAODR mode - use normal ODR encoding (HAODR_SEL = 00)
+    // This allows us to use 1920Hz ODR
+    lsm6dxxWriteRegister(dev, 0x62, 0x00, 1);  // HAODR_CFG = 0x00 (normal mode)
 
-    // Enable accelerometer in high-accuracy mode with ODR = 1000Hz (value 9 in HAODR_MODE1)
+    // Configure accelerometer: 1920Hz ODR, High-Performance mode
+    // CTRL1_XL[7:4] = OP_MODE_XL (0=HIGH_PERF), CTRL1_XL[3:0] = ODR_XL (0x0A=1920Hz)
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL1_XL, 
-                         (0x01 << 4) |  // OP_MODE_XL = 01 (HIGH_ACCURACY)
-                         (0x09 << 0), 1); // ODR_XL = 1000Hz in HAODR_MODE1
+                         (0x00 << 4) |  // OP_MODE_XL = 0 (HIGH_PERF)
+                         (0x0A << 0), 1); // ODR_XL = 0x0A (1920Hz in normal mode)
 
-    // Enable gyroscope in high-accuracy mode with ODR = 8000Hz (value 12 in HAODR_MODE1)
+    // Configure gyroscope: 1920Hz ODR, High-Performance mode
+    // CTRL2_G[7:4] = OP_MODE_G (0=HIGH_PERF), CTRL2_G[3:0] = ODR_G (0x0A=1920Hz)
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL2_G, 
-                         (0x01 << 4) |  // OP_MODE_G = 01 (HIGH_ACCURACY)
-                         (0x0C << 0), 1); // ODR_G = 8000Hz in HAODR_MODE1
+                         (0x00 << 4) |  // OP_MODE_G = 0 (HIGH_PERF)
+                         (0x0A << 0), 1); // ODR_G = 0x0A (1920Hz in normal mode)
 
     // Set accelerometer full-scale to ±16g in CTRL8
+    // CTRL8[1:0] = FS_XL (0x03 = ±16g)
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL8_XL, 
                          0x03, 1);  // FS_XL = 11 (±16g)
 
     // Set gyroscope full-scale to ±2000dps in CTRL6
+    // CTRL6[3:0] = FS_G (0x04 = ±2000dps)
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL6_C, 
                          0x04, 1);  // FS_G = 0100 (±2000dps)
 
@@ -139,6 +143,18 @@ static void lsm6dsv16xConfig(gyroDev_t *gyro)
     // Disable I2C/I3C interface (SPI only)
     lsm6dxxWriteRegister(dev, LSM6DXX_REG_CTRL9_XL, 
                          BIT(0), 1);  // I2C_I3C_DISABLE
+
+    // Readback verification (DEBUG)
+    uint8_t ctrl1_xl, ctrl2_g, ctrl6_c, ctrl8_xl, haodr_cfg;
+    busRead(dev, LSM6DXX_REG_CTRL1_XL, &ctrl1_xl);
+    busRead(dev, LSM6DXX_REG_CTRL2_G, &ctrl2_g);
+    busRead(dev, LSM6DXX_REG_CTRL6_C, &ctrl6_c);
+    busRead(dev, LSM6DXX_REG_CTRL8_XL, &ctrl8_xl);
+    busRead(dev, 0x62, &haodr_cfg);  // HAODR_CFG
+
+    // Optional: Log for verification (uncomment if needed)
+    // DEBUG_PRINTF("LSM6DSV16X Config: CTRL1_XL=0x%02X CTRL2_G=0x%02X CTRL6_C=0x%02X CTRL8_XL=0x%02X HAODR=0x%02X\n",
+    //              ctrl1_xl, ctrl2_g, ctrl6_c, ctrl8_xl, haodr_cfg);
 
     busSetSpeed(dev, BUS_SPEED_FAST);
 }
@@ -296,7 +312,7 @@ bool lsm6dGyroDetect(gyroDev_t *gyro)
     gyro->initFn = lsm6dxxSpiGyroInit;
     gyro->readFn = lsm6dxxGyroRead;
     gyro->intStatusFn = gyroCheckDataReady;
-    gyro->scale = 1.0f / 28.509f; // 2000 dps: 70 mdps/LSB (from datasheet Table 3)
+    gyro->scale = 1.0f / 14.286f; // 2000 dps: 70 mdps/LSB (from datasheet Table 3)
     gyro->gyroAlign = gyro->busDev->param;  // 使用 target.h 中定义的对齐设置
     return true;
 
