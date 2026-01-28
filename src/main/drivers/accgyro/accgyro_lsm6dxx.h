@@ -110,8 +110,20 @@ typedef enum {
     LSM6DSV16X_VAL_CTRL1_XL_ODR960 = 0x09,   // 加速度计 960Hz ODR
     LSM6DSV16X_VAL_CTRL1_XL_ODR480 = 0x08,   // 加速度计 480Hz ODR
 
+    // LSM6DSV16X IF_CFG寄存器配置值 - 接口配置
+    LSM6DSV16X_VAL_IF_CFG_I2C_I3C_DISABLE = BIT(0), // 禁用 I2C 和 I3C
+
+    // LSM6DSV16X HAODR_CFG寄存器配置值 - 高精度ODR配置
+    LSM6DSV16X_VAL_HAODR_CFG_NORMAL = 0x00,   // 正常ODR模式 (HAODR_SEL = 00)
+    LSM6DSV16X_VAL_HAODR_CFG_MODE1 = 0x10,    // HAODR模式1 (HAODR_SEL = 01)
+    LSM6DSV16X_VAL_HAODR_CFG_MODE2 = 0x20,    // HAODR模式2 (HAODR_SEL = 10)
+
     // LSM6DSV16X CTRL9 - 禁用 I2C 和 I3C (bit 0)
     LSM6DSV16X_VAL_CTRL9_I2C_I3C_DISABLE = BIT(0), // CTRL9[0]=1 禁用 I2C 和 I3C
+
+    // LSM6DSV16X specific registers (moved from enum to constants)
+    LSM6DSV16X_REG_IF_CFG = 0x03,             // 接口配置寄存器地址
+    LSM6DSV16X_REG_HAODR_CFG = 0x62,          // HAODR配置寄存器地址
 } lsm6dxxConfigValues_e;
 
 // LSM6DXX register configuration bit masks
