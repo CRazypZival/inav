@@ -23,12 +23,19 @@
 #include "fc/fc_msp_box.h"
 #include "io/serial.h"
 #include "io/piniobox.h"
+#include "rx/rx.h"
+#include "flight/imu.h"
 
 void targetConfiguration(void)
 {
     pinioBoxConfigMutable()->permanentId[0] = BOX_PERMANENT_ID_USER1; 
     serialConfigMutable()->portConfigs[findSerialPortIndexByIdentifier(SERIAL_PORT_USART1)].functionMask = FUNCTION_RX_SERIAL;
+    rxConfigMutable()->receiverType = RX_TYPE_SERIAL;
+    rxConfigMutable()->serialrx_provider = SERIALRX_CRSF;
     serialConfigMutable()->portConfigs[findSerialPortIndexByIdentifier(SERIAL_PORT_USART3)].functionMask = FUNCTION_GPS;
     serialConfigMutable()->portConfigs[findSerialPortIndexByIdentifier(SERIAL_PORT_USART6)].functionMask = FUNCTION_MSP;
     
+    // AHRS accelerometer ignore settings
+    imuConfigMutable()->acc_ignore_rate = 20;
+    imuConfigMutable()->acc_ignore_slope = 7;
 }
