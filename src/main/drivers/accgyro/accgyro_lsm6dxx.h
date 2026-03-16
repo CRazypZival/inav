@@ -124,6 +124,29 @@ typedef enum {
     // LSM6DSV16X specific registers (moved from enum to constants)
     LSM6DSV16X_REG_IF_CFG = 0x03,             // 接口配置寄存器地址
     LSM6DSV16X_REG_HAODR_CFG = 0x62,          // HAODR配置寄存器地址
+
+    // LSM6DSV32X 特定的陀螺仪 ODR 值 (CTRL2_G[3:0]，HAODR_SEL=00 正常模式)
+    LSM6DSV32X_VAL_CTRL2_G_ODR1920 = 0x0A,   // 陀螺仪 1920Hz ODR (正常模式)
+
+    // LSM6DSV32X 特定的加速度计 ODR 值 (CTRL1_XL[3:0]，HAODR_SEL=00 正常模式)
+    LSM6DSV32X_VAL_CTRL1_XL_ODR1920 = 0x0A,  // 加速度计 1920Hz ODR (正常模式)
+
+    // LSM6DSV32X IF_CFG寄存器配置值 - 接口配置
+    LSM6DSV32X_VAL_IF_CFG_I2C_I3C_DISABLE = BIT(0), // 禁用 I2C 和 I3C
+
+    // LSM6DSV32X HAODR_CFG寄存器配置值 - 高精度ODR配置
+    LSM6DSV32X_VAL_HAODR_CFG_NORMAL = 0x00,   // 正常ODR模式 (HAODR_SEL = 00)
+
+    // LSM6DSV32X CTRL8 - 加速度计量程设置 (CTRL8[1:0])
+    // LSM6DSV32X: 00=2g, 01=4g, 10=8g, 10=16g, 11=32g
+    LSM6DSV32X_VAL_CTRL8_FS_XL_16G = 0x02,   // 加速度计 16G 量程
+
+    // LSM6DSV32X CTRL6 - 陀螺仪量程设置 (CTRL6[3:0])
+    LSM6DSV32X_VAL_CTRL6_FS_G_2000DPS = 0x04, // 陀螺仪 2000dps 量程
+
+    // LSM6DSV32X specific registers
+    LSM6DSV32X_REG_IF_CFG = 0x03,             // 接口配置寄存器地址
+    LSM6DSV32X_REG_HAODR_CFG = 0x62,          // HAODR配置寄存器地址
 } lsm6dxxConfigValues_e;
 
 // LSM6DXX register configuration bit masks
