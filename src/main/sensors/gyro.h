@@ -22,6 +22,7 @@
 #include "common/vector.h"
 #include "common/time.h"
 #include "config/parameter_group.h"
+#include "drivers/accgyro/accgyro.h"
 #include "drivers/sensor.h"
 #include "flight/dynamic_gyro_notch.h"
 #include "flight/secondary_dynamic_gyro_notch.h"
@@ -43,6 +44,7 @@ typedef enum {
     GYRO_ICM42605,
     GYRO_BMI270,
     GYRO_LSM6DXX,
+    GYRO_ICM40609,
     GYRO_FAKE
    
 } gyroSensor_e;
@@ -111,3 +113,4 @@ int16_t gyroGetTemperature(void);
 int16_t gyroRateDps(int axis);
 void gyroUpdateDynamicLpf(float cutoffFreq);
 float averageAbsGyroRates(void);
+const gyroDev_t *gyroGetPrimaryDevice(void);

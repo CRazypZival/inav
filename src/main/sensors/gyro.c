@@ -46,6 +46,7 @@
 #include "drivers/accgyro/accgyro_bmi160.h"
 #include "drivers/accgyro/accgyro_bmi270.h"
 #include "drivers/accgyro/accgyro_icm20689.h"
+#include "drivers/accgyro/accgyro_icm40609.h"
 #include "drivers/accgyro/accgyro_icm42605.h"
 #include "drivers/accgyro/accgyro_lsm6dxx.h"
 #include "drivers/accgyro/accgyro_fake.h"
@@ -184,6 +185,15 @@ STATIC_UNIT_TESTED gyroSensor_e gyroDetect(gyroDev_t *dev, gyroSensor_e gyroHard
     case GYRO_ICM20689:
         if (icm20689GyroDetect(dev)) {
             gyroHardware = GYRO_ICM20689;
+            break;
+        }
+        FALLTHROUGH;
+#endif
+
+#ifdef USE_IMU_ICM40609
+    case GYRO_ICM40609:
+        if (icm40609GyroDetect(dev)) {
+            gyroHardware = GYRO_ICM40609;
             break;
         }
         FALLTHROUGH;
@@ -580,4 +590,13 @@ void gyroUpdateDynamicLpf(float cutoffFreq) {
 float averageAbsGyroRates(void)
 {
     return (fabsf(gyro.gyroADCf[ROLL]) + fabsf(gyro.gyroADCf[PITCH]) + fabsf(gyro.gyroADCf[YAW])) / 3.0f;
+}
+
+const gyroDev_t *gyroGetPrimaryDevice(void)
+{
+    if (!gyro.initialized) {
+        return NULL;
+    }
+
+    return &gyroDev[0];
 }

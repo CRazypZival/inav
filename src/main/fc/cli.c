@@ -51,8 +51,10 @@ bool cliMode = false;
 #include "config/parameter_group_ids.h"
 
 #include "drivers/accgyro/accgyro.h"
+#include "drivers/accgyro/accgyro_mpu.h"
 #include "drivers/pwm_mapping.h"
 #include "drivers/buf_writer.h"
+#include "drivers/bus.h"
 #include "drivers/bus_i2c.h"
 #include "drivers/compass/compass.h"
 #include "drivers/flash.h"
@@ -186,7 +188,7 @@ static const char * const blackboxIncludeFlagNames[] = {
 
 /* Sensor names (used in lookup tables for *_hardware settings and in status command output) */
 // sync with gyroSensor_e
-static const char * const gyroNames[] = { "NONE", "AUTO", "MPU6000", "MPU6500", "MPU9250", "BMI160", "ICM20689", "BMI088", "ICM42605", "BMI270","LSM6DXX", "FAKE"};
+static const char * const gyroNames[] = { "NONE", "AUTO", "MPU6000", "MPU6500", "MPU9250", "BMI160", "ICM20689", "BMI088", "ICM42605", "BMI270","LSM6DXX", "ICM40609", "FAKE"};
 
 // sync this with sensors_e
 static const char * const sensorTypeNames[] = {
@@ -3642,6 +3644,168 @@ static const char * getBatteryStateString(void)
     return batteryStateStrings[getBatteryState()];
 }
 
+static void cliPrintGyroReg(const busDevice_t *busDev, uint8_t reg)
+{
+    uint8_t value = 0;
+    const bool ok = busRead(busDev, reg, &value);
+
+    if (ok) {
+        cliPrintLinef("reg 0x%02X = 0x%02X", reg, value);
+    } else {
+        cliPrintLinef("reg 0x%02X = <read error>", reg);
+    }
+}
+
+static void cliProbeWhoAmIOnSpiGyros(void)
+{
+    static const devHardwareType_e hwCandidates[] = {
+        DEVHW_ICM40609,
+        DEVHW_ICM42605,
+        DEVHW_ICM20689,
+        DEVHW_MPU6000,
+        DEVHW_MPU6500,
+        DEVHW_MPU9250,
+        DEVHW_BMI270,
+        DEVHW_BMI160,
+        DEVHW_BMI088_GYRO,
+        DEVHW_LSM6D
+    };
+    static const uint8_t regCandidates[] = {
+        0x00, 0x01, 0x10, 0x11, 0x12, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77
+    };
+
+    bool foundAny = false;
+
+    for (unsigned hwIndex = 0; hwIndex < ARRAYLEN(hwCandidates); hwIndex++) {
+        for (uint8_t tag = 0; tag < 4; tag++) {
+            busDevice_t *probeDev = busDeviceInit(BUSTYPE_SPI, hwCandidates[hwIndex], tag, OWNER_MPU);
+            if (probeDev == NULL) {
+                continue;
+            }
+
+            foundAny = true;
+            cliPrintLinef("Probe: hw=%u tag=%u spiBus=%u csTag=%u flags=0x%02X",
+                (unsigned)hwCandidates[hwIndex],
+                (unsigned)tag,
+                (unsigned)probeDev->busdev.spi.spiBus,
+                (unsigned)probeDev->descriptorPtr->busdev.spi.csnPin,
+                (unsigned)probeDev->flags);
+            busSetSpeed(probeDev, BUS_SPEED_INITIALIZATION);
+
+            // Try reading ID space in current bank
+            for (unsigned i = 0; i < ARRAYLEN(regCandidates); i++) {
+                cliPrintGyroReg(probeDev, regCandidates[i]);
+            }
+
+            // Also try forcing bank0 for 426xx/40609-compatible chips
+            busWrite(probeDev, 0x76, 0x00);
+            cliPrintLine("After bank=0 select:");
+            cliPrintGyroReg(probeDev, 0x75);
+            cliPrintGyroReg(probeDev, 0x4E);
+            cliPrintGyroReg(probeDev, 0x4F);
+            cliPrintGyroReg(probeDev, 0x50);
+
+            busSetSpeed(probeDev, BUS_SPEED_FAST);
+            busDeviceDeInit(probeDev);
+        }
+    }
+
+    if (!foundAny) {
+        cliPrintLine("No SPI gyro bus descriptor found in this target build");
+    }
+}
+
+static void cliSpiRegisters(char *cmdline)
+{
+    const bool forceProbe = (checkCommand(cmdline, "probe") != NULL);
+
+    if (!gyro.initialized) {
+        cliPrintLine("Gyro not initialized, scanning SPI gyro descriptors...");
+        cliProbeWhoAmIOnSpiGyros();
+        return;
+    }
+
+    if (forceProbe) {
+        cliPrintLine("Gyro is initialized, skip probe mode to avoid reinitializing bus descriptors");
+    }
+
+    const gyroDev_t *gyroDev = gyroGetPrimaryDevice();
+    if ((gyroDev == NULL) || (gyroDev->busDev == NULL)) {
+        cliPrintLine("Gyro device is not available");
+        return;
+    }
+
+    const busDevice_t *busDev = gyroDev->busDev;
+    const uint8_t gyroType = detectedSensors[SENSOR_INDEX_GYRO];
+    const char *gyroName = (gyroType < ARRAYLEN(gyroNames)) ? gyroNames[gyroType] : "UNKNOWN";
+
+    cliPrintLinef("Gyro: %s", gyroName);
+    cliPrintLinef("Bus: type=%u tag=%u hw=%u", (unsigned)busDev->busType, (unsigned)busDev->descriptorPtr->tag, (unsigned)busDev->descriptorPtr->devHwType);
+
+    if (busDev->busType != BUSTYPE_SPI) {
+        cliPrintLine("Current gyro is not on SPI bus");
+        return;
+    }
+
+    busSetSpeed(busDev, BUS_SPEED_INITIALIZATION);
+
+    switch (gyroType) {
+    case GYRO_ICM42605:
+    case GYRO_ICM40609:
+        cliPrintLine("Bank0:");
+        busWrite(busDev, 0x76, 0x00);
+        cliPrintGyroReg(busDev, MPU_RA_WHO_AM_I);
+        cliPrintGyroReg(busDev, 0x4E); // PWR_MGMT0
+        cliPrintGyroReg(busDev, 0x4F); // GYRO_CONFIG0
+        cliPrintGyroReg(busDev, 0x50); // ACCEL_CONFIG0
+        cliPrintGyroReg(busDev, 0x52); // GYRO_ACCEL_CONFIG0
+        cliPrintGyroReg(busDev, 0x14); // INT_CONFIG
+        cliPrintGyroReg(busDev, 0x63); // INT_CONFIG0
+        cliPrintGyroReg(busDev, 0x64); // INT_CONFIG1
+        cliPrintGyroReg(busDev, 0x65); // INT_SOURCE0
+
+        cliPrintLine("Bank1:");
+        busWrite(busDev, 0x76, 0x01);
+        cliPrintGyroReg(busDev, 0x0C); // GYRO_CONFIG_STATIC3
+        cliPrintGyroReg(busDev, 0x0D); // GYRO_CONFIG_STATIC4
+        cliPrintGyroReg(busDev, 0x0E); // GYRO_CONFIG_STATIC5
+
+        cliPrintLine("Bank2:");
+        busWrite(busDev, 0x76, 0x02);
+        cliPrintGyroReg(busDev, 0x03); // ACCEL_CONFIG_STATIC2
+        cliPrintGyroReg(busDev, 0x04); // ACCEL_CONFIG_STATIC3
+        cliPrintGyroReg(busDev, 0x05); // ACCEL_CONFIG_STATIC4
+
+        busWrite(busDev, 0x76, 0x00);
+        break;
+
+    case GYRO_MPU6000:
+    case GYRO_MPU6500:
+    case GYRO_MPU9250:
+    case GYRO_ICM20689:
+        cliPrintGyroReg(busDev, MPU_RA_WHO_AM_I);
+        cliPrintGyroReg(busDev, MPU_RA_PWR_MGMT_1);
+        cliPrintGyroReg(busDev, MPU_RA_PWR_MGMT_2);
+        cliPrintGyroReg(busDev, MPU_RA_SMPLRT_DIV);
+        cliPrintGyroReg(busDev, MPU_RA_CONFIG);
+        cliPrintGyroReg(busDev, MPU_RA_GYRO_CONFIG);
+        cliPrintGyroReg(busDev, MPU_RA_ACCEL_CONFIG);
+        cliPrintGyroReg(busDev, MPU_RA_INT_PIN_CFG);
+        cliPrintGyroReg(busDev, MPU_RA_INT_ENABLE);
+        break;
+
+    default:
+        // Generic fallback for other SPI gyros
+        cliPrintGyroReg(busDev, MPU_RA_WHO_AM_I);
+        cliPrintGyroReg(busDev, 0x10);
+        cliPrintGyroReg(busDev, 0x11);
+        cliPrintGyroReg(busDev, 0x12);
+        break;
+    }
+
+    busSetSpeed(busDev, BUS_SPEED_FAST);
+}
+
 static void cliStatus(char *cmdline)
 {
     UNUSED(cmdline);
@@ -4347,6 +4511,7 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("smix", "servo mixer",
         "<rule> <servo> <source> <rate> <speed> <conditionId>\r\n"
         "\treset\r\n", cliServoMix),
+    CLI_COMMAND_DEF("spiregisters", "print SPI gyro registers / probe WHO_AM_I", "[probe]", cliSpiRegisters),
 #ifdef USE_SDCARD
     CLI_COMMAND_DEF("sd_info", "sdcard info", NULL, cliSdInfo),
 #endif
