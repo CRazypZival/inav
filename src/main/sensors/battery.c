@@ -71,6 +71,23 @@
 #define VBATT_HYSTERESIS 10                     // Batt Hysteresis of +/-100mV for changing battery state
 #define VBATT_LPF_FREQ  1                       // Battery voltage filtering cutoff
 #define AMPERAGE_LPF_FREQ  1                    // Battery current filtering cutoff
+#ifdef CURRENT_METER_DUAL_CALIBRATION
+#ifndef CURRENT_METER_DUAL_TRANSITION_UV_START
+#define CURRENT_METER_DUAL_TRANSITION_UV_START 120000  // ADC pin voltage in uV
+#endif
+#ifndef CURRENT_METER_DUAL_TRANSITION_UV_END
+#define CURRENT_METER_DUAL_TRANSITION_UV_END   200000  // ADC pin voltage in uV
+#endif
+#ifndef CURRENT_METER_DUAL_LOW_USE_CLI
+#define CURRENT_METER_DUAL_LOW_USE_CLI 1               // 1: low-range uses CLI/runtime values
+#endif
+#ifndef CURRENT_METER_LOW_SCALE
+#define CURRENT_METER_LOW_SCALE CURRENT_METER_SCALE
+#endif
+#ifndef CURRENT_METER_LOW_OFFSET
+#define CURRENT_METER_LOW_OFFSET CURRENT_METER_OFFSET
+#endif
+#endif
 #define IMPEDANCE_STABLE_SAMPLE_COUNT_THRESH 10 // Minimum sample count to consider calculated power supply impedance as stable
 
 
@@ -529,8 +546,48 @@ int16_t getAmperage(void)
 
 int16_t getAmperageSample(void)
 {
-    int32_t microvolts = ((uint32_t)adcGetChannel(ADC_CURRENT) * ADCVREF * 100) / 0xFFF * 10 - (int32_t)batteryMetersConfig()->current.offset * 100;
-    return microvolts / batteryMetersConfig()->current.scale; // current in 0.01A steps
+    const uint16_t adcRaw = adcGetChannel(ADC_CURRENT);
+    const int32_t microvolts = ((uint32_t)adcRaw * ADCVREF * 100) / 0xFFF * 10;
+    const int32_t adcPinVoltageUv = ((uint32_t)adcRaw * ADCVREF * 1000) / 0xFFF;
+
+    int16_t lowScale = batteryMetersConfig()->current.scale;
+    int16_t lowOffset = batteryMetersConfig()->current.offset;
+
+#if defined(CURRENT_METER_DUAL_CALIBRATION) && (CURRENT_METER_DUAL_LOW_USE_CLI == 0)
+    lowScale = CURRENT_METER_LOW_SCALE;
+    lowOffset = CURRENT_METER_LOW_OFFSET;
+#endif
+
+    if (!lowScale) {
+        return 0;
+    }
+
+    const int16_t lowAmperageSample = (microvolts - (int32_t)lowOffset * 100) / lowScale;
+
+#ifdef CURRENT_METER_DUAL_CALIBRATION
+    if (!CURRENT_METER_HIGH_SCALE) {
+        return lowAmperageSample;
+    }
+
+    const int16_t highAmperageSample = (microvolts - (int32_t)CURRENT_METER_HIGH_OFFSET * 100) / CURRENT_METER_HIGH_SCALE;
+
+    if (adcPinVoltageUv <= CURRENT_METER_DUAL_TRANSITION_UV_START) {
+        return lowAmperageSample;
+    }
+
+    if (adcPinVoltageUv >= CURRENT_METER_DUAL_TRANSITION_UV_END) {
+        return highAmperageSample;
+    }
+
+    if (CURRENT_METER_DUAL_TRANSITION_UV_END > CURRENT_METER_DUAL_TRANSITION_UV_START) {
+        // Linear blend in transition zone to avoid abrupt jumps.
+        const int32_t blendNum = adcPinVoltageUv - CURRENT_METER_DUAL_TRANSITION_UV_START;
+        const int32_t blendDen = CURRENT_METER_DUAL_TRANSITION_UV_END - CURRENT_METER_DUAL_TRANSITION_UV_START;
+        return (int16_t)(((int32_t)lowAmperageSample * (blendDen - blendNum) + (int32_t)highAmperageSample * blendNum) / blendDen);
+    }
+#endif
+
+    return lowAmperageSample;
 }
 
 int32_t getPower(void)
