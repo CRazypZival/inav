@@ -24,6 +24,7 @@
 #include "platform.h"
 
 #include "build/debug.h"
+#include "build/atomic.h"
 
 #include "common/maths.h"
 #include "common/filter.h"
@@ -33,6 +34,7 @@
 #include "config/parameter_group_ids.h"
 
 #include "drivers/adc.h"
+#include "drivers/nvic.h"
 #include "drivers/time.h"
 
 #include "fc/config.h"
@@ -71,6 +73,9 @@
 #define VBATT_HYSTERESIS 10                     // Batt Hysteresis of +/-100mV for changing battery state
 #define VBATT_LPF_FREQ  1                       // Battery voltage filtering cutoff
 #define AMPERAGE_LPF_FREQ  1                    // Battery current filtering cutoff
+#ifndef CURRENT_METER_LPF_FREQ
+#define CURRENT_METER_LPF_FREQ AMPERAGE_LPF_FREQ
+#endif
 #ifdef CURRENT_METER_DUAL_CALIBRATION
 #ifndef CURRENT_METER_DUAL_TRANSITION_UV_START
 #define CURRENT_METER_DUAL_TRANSITION_UV_START 120000  // ADC pin voltage in uV
@@ -110,6 +115,23 @@ static int16_t amperage = 0;                    // amperage read by current sens
 static int32_t power = 0;                       // power draw in cW (0.01W resolution)
 static int32_t mAhDrawn = 0;                    // milliampere hours drawn from the battery since start
 static int32_t mWhDrawn = 0;                    // energy (milliWatt hours) drawn from the battery since start
+
+static uint16_t currentMeterLastAdcRaw = 0;
+static int16_t currentMeterLastScale = 0;
+static int16_t currentMeterLastOffset = 0;
+
+#define CURRENT_METER_RECORD_STEP_A 10
+#define CURRENT_METER_RECORD_MAX_BUCKETS 101    // 0A..1000A, 10A bins
+typedef struct currentMeterRecordBucket_s {
+    uint32_t adcRawSum;
+    uint16_t sampleCount;
+    int16_t scale;
+    int16_t offset;
+    bool valid;
+} currentMeterRecordBucket_t;
+
+static currentMeterRecordBucket_t currentMeterRecord[CURRENT_METER_RECORD_MAX_BUCKETS];
+static uint8_t currentMeterRecordMaxBucket = 0;
 
 batteryState_e batteryState;
 const batteryProfile_t *currentBatteryProfile;
@@ -184,7 +206,7 @@ void pgResetFn_batteryProfiles(batteryProfile_t *instance)
     }
 }
 
-PG_REGISTER_WITH_RESET_TEMPLATE(batteryMetersConfig_t, batteryMetersConfig, PG_BATTERY_METERS_CONFIG, 1);
+PG_REGISTER_WITH_RESET_TEMPLATE(batteryMetersConfig_t, batteryMetersConfig, PG_BATTERY_METERS_CONFIG, 2);
 
 PG_RESET_TEMPLATE(batteryMetersConfig_t, batteryMetersConfig,
 
@@ -199,6 +221,17 @@ PG_RESET_TEMPLATE(batteryMetersConfig_t, batteryMetersConfig,
         .type = SETTING_CURRENT_METER_TYPE_DEFAULT,
         .scale = CURRENT_METER_SCALE,
         .offset = CURRENT_METER_OFFSET
+    },
+
+    .currentDual = {
+        .enabled = CURRENT_METER_DUAL_CALIBRATION_DEFAULT,
+        .lowUseCli = CURRENT_METER_DUAL_LOW_USE_CLI_DEFAULT,
+        .lowScale = CURRENT_METER_LOW_SCALE_DEFAULT,
+        .lowOffset = CURRENT_METER_LOW_OFFSET_DEFAULT,
+        .transitionUvStart = CURRENT_METER_DUAL_TRANSITION_UV_START_DEFAULT,
+        .transitionUvEnd = CURRENT_METER_DUAL_TRANSITION_UV_END_DEFAULT,
+        .highScale = CURRENT_METER_HIGH_SCALE_DEFAULT,
+        .highOffset = CURRENT_METER_HIGH_OFFSET_DEFAULT,
     },
 
     .voltageSource = SETTING_BAT_VOLTAGE_SRC_DEFAULT,
@@ -544,50 +577,74 @@ int16_t getAmperage(void)
     return amperage;
 }
 
-int16_t getAmperageSample(void)
+static int16_t getAmperageSampleInternal(timeUs_t timeDelta, bool useFilteredTransitionMv)
 {
+    static pt1Filter_t transitionMvFilterState;
+    static bool transitionMvFilterInitialized = false;
+
     const uint16_t adcRaw = adcGetChannel(ADC_CURRENT);
     const int32_t microvolts = ((uint32_t)adcRaw * ADCVREF * 100) / 0xFFF * 10;
     const int32_t adcPinVoltageUv = ((uint32_t)adcRaw * ADCVREF * 1000) / 0xFFF;
+    const uint16_t adcPinVoltageMv = (uint16_t)(adcPinVoltageUv / 1000);
+    const batteryMetersConfig_t *cfg = batteryMetersConfig();
+    int16_t lowScale = cfg->current.scale;
+    int16_t lowOffset = cfg->current.offset;
 
-    int16_t lowScale = batteryMetersConfig()->current.scale;
-    int16_t lowOffset = batteryMetersConfig()->current.offset;
-
-#if defined(CURRENT_METER_DUAL_CALIBRATION) && (CURRENT_METER_DUAL_LOW_USE_CLI == 0)
-    lowScale = CURRENT_METER_LOW_SCALE;
-    lowOffset = CURRENT_METER_LOW_OFFSET;
-#endif
+    if (cfg->currentDual.enabled && !cfg->currentDual.lowUseCli) {
+        lowScale = cfg->currentDual.lowScale;
+        lowOffset = cfg->currentDual.lowOffset;
+    }
 
     if (!lowScale) {
         return 0;
     }
 
     const int16_t lowAmperageSample = (microvolts - (int32_t)lowOffset * 100) / lowScale;
+    currentMeterLastAdcRaw = adcRaw;
+    currentMeterLastScale = lowScale;
+    currentMeterLastOffset = lowOffset;
 
-#ifdef CURRENT_METER_DUAL_CALIBRATION
-    if (!CURRENT_METER_HIGH_SCALE) {
+    if (!cfg->currentDual.enabled || !cfg->currentDual.highScale) {
         return lowAmperageSample;
     }
 
-    const int16_t highAmperageSample = (microvolts - (int32_t)CURRENT_METER_HIGH_OFFSET * 100) / CURRENT_METER_HIGH_SCALE;
+    const int16_t highAmperageSample = (microvolts - (int32_t)cfg->currentDual.highOffset * 100) / cfg->currentDual.highScale;
+    uint32_t transitionVoltageUv = adcPinVoltageUv;
 
-    if (adcPinVoltageUv <= CURRENT_METER_DUAL_TRANSITION_UV_START) {
+    if (useFilteredTransitionMv) {
+        if (!transitionMvFilterInitialized) {
+            pt1FilterReset(&transitionMvFilterState, adcPinVoltageMv);
+            transitionMvFilterInitialized = true;
+        } else {
+            transitionVoltageUv = (uint32_t)(pt1FilterApply4(&transitionMvFilterState, adcPinVoltageMv, CURRENT_METER_LPF_FREQ, US2S(timeDelta)) * 1000.0f);
+        }
+    }
+
+    if (transitionVoltageUv <= cfg->currentDual.transitionUvStart) {
         return lowAmperageSample;
     }
 
-    if (adcPinVoltageUv >= CURRENT_METER_DUAL_TRANSITION_UV_END) {
+    if (transitionVoltageUv >= cfg->currentDual.transitionUvEnd) {
+        currentMeterLastScale = cfg->currentDual.highScale;
+        currentMeterLastOffset = cfg->currentDual.highOffset;
         return highAmperageSample;
     }
 
-    if (CURRENT_METER_DUAL_TRANSITION_UV_END > CURRENT_METER_DUAL_TRANSITION_UV_START) {
+    if (cfg->currentDual.transitionUvEnd > cfg->currentDual.transitionUvStart) {
         // Linear blend in transition zone to avoid abrupt jumps.
-        const int32_t blendNum = adcPinVoltageUv - CURRENT_METER_DUAL_TRANSITION_UV_START;
-        const int32_t blendDen = CURRENT_METER_DUAL_TRANSITION_UV_END - CURRENT_METER_DUAL_TRANSITION_UV_START;
+        const int32_t blendNum = transitionVoltageUv - cfg->currentDual.transitionUvStart;
+        const int32_t blendDen = cfg->currentDual.transitionUvEnd - cfg->currentDual.transitionUvStart;
+        currentMeterLastScale = (int16_t)(((int32_t)lowScale * (blendDen - blendNum) + (int32_t)cfg->currentDual.highScale * blendNum) / blendDen);
+        currentMeterLastOffset = (int16_t)(((int32_t)lowOffset * (blendDen - blendNum) + (int32_t)cfg->currentDual.highOffset * blendNum) / blendDen);
         return (int16_t)(((int32_t)lowAmperageSample * (blendDen - blendNum) + (int32_t)highAmperageSample * blendNum) / blendDen);
     }
-#endif
 
     return lowAmperageSample;
+}
+
+int16_t getAmperageSample(void)
+{
+    return getAmperageSampleInternal(0, false);
 }
 
 int32_t getPower(void)
@@ -609,11 +666,14 @@ void currentMeterUpdate(timeUs_t timeDelta)
 {
     static pt1Filter_t amperageFilterState;
     static int64_t mAhdrawnRaw = 0;
+    int16_t recordAmperage = amperage;
 
     switch (batteryMetersConfig()->current.type) {
         case CURRENT_SENSOR_ADC:
             {
-                amperage = pt1FilterApply4(&amperageFilterState, getAmperageSample(), AMPERAGE_LPF_FREQ, US2S(timeDelta));
+                const int16_t rawAmperageSample = getAmperageSampleInternal(timeDelta, true);
+                recordAmperage = rawAmperageSample;
+                amperage = pt1FilterApply4(&amperageFilterState, rawAmperageSample, AMPERAGE_LPF_FREQ, US2S(timeDelta));
                 break;
             }
         case CURRENT_SENSOR_VIRTUAL:
@@ -660,12 +720,96 @@ void currentMeterUpdate(timeUs_t timeDelta)
 
     // Clamp amperage to positive values
     amperage = MAX(0, amperage);
+    recordAmperage = MAX(0, recordAmperage);
+
+    if (batteryMetersConfig()->current.type == CURRENT_SENSOR_ADC && currentMeterLastScale != 0) {
+        const uint16_t bucketRaw = (uint16_t)(recordAmperage / (CURRENT_METER_RECORD_STEP_A * 100)); // 10A bins, amperage in cA
+        const uint8_t bucketIndex = (uint8_t)MIN(bucketRaw, (uint16_t)(CURRENT_METER_RECORD_MAX_BUCKETS - 1));
+        currentMeterRecordBucket_t *bucket = &currentMeterRecord[bucketIndex];
+
+        if (bucket->valid && (bucket->scale != currentMeterLastScale || bucket->offset != currentMeterLastOffset)) {
+            // Calibration regime changed within this bin; restart bin stats to keep report coherent.
+            bucket->adcRawSum = 0;
+            bucket->sampleCount = 0;
+        }
+
+        bucket->adcRawSum += currentMeterLastAdcRaw;
+        if (bucket->sampleCount < UINT16_MAX) {
+            bucket->sampleCount++;
+        }
+        bucket->scale = currentMeterLastScale;
+        bucket->offset = currentMeterLastOffset;
+        bucket->valid = true;
+        if (bucketIndex > currentMeterRecordMaxBucket) {
+            currentMeterRecordMaxBucket = bucketIndex;
+        }
+    }
 
     // Work around int64 math compiler bug, don't change it unless the bug has been fixed !
     // should be: mAhdrawnRaw += (int64_t)amperage * timeDelta / 1000;
     mAhdrawnRaw += (int64_t)((int32_t)amperage * timeDelta) / 1000;
 
     mAhDrawn = mAhdrawnRaw / (3600 * 100);
+}
+
+void currentMeterRecordReset(void)
+{
+    for (int i = 0; i < CURRENT_METER_RECORD_MAX_BUCKETS; i++) {
+        currentMeterRecord[i].adcRawSum = 0;
+        currentMeterRecord[i].sampleCount = 0;
+        currentMeterRecord[i].scale = 0;
+        currentMeterRecord[i].offset = 0;
+        currentMeterRecord[i].valid = false;
+    }
+    currentMeterRecordMaxBucket = 0;
+}
+
+uint8_t currentMeterRecordGetMaxBucket(void)
+{
+    return currentMeterRecordMaxBucket;
+}
+
+bool currentMeterRecordGetBucket(uint8_t bucketIndex, uint16_t *adcRaw, uint16_t *adcMv, int16_t *scale, int16_t *offset)
+{
+    if (bucketIndex >= CURRENT_METER_RECORD_MAX_BUCKETS) {
+        return false;
+    }
+
+    uint32_t adcRawSum = 0;
+    uint16_t sampleCount = 0;
+    int16_t bucketScale = 0;
+    int16_t bucketOffset = 0;
+    bool bucketValid = false;
+
+    ATOMIC_BLOCK(NVIC_PRIO_MAX) {
+        const currentMeterRecordBucket_t *bucket = &currentMeterRecord[bucketIndex];
+        adcRawSum = bucket->adcRawSum;
+        sampleCount = bucket->sampleCount;
+        bucketScale = bucket->scale;
+        bucketOffset = bucket->offset;
+        bucketValid = bucket->valid;
+    }
+
+    if (!bucketValid || sampleCount == 0) {
+        return false;
+    }
+
+    const uint16_t rawAverage = (uint16_t)(adcRawSum / sampleCount);
+
+    if (adcRaw) {
+        *adcRaw = rawAverage;
+    }
+    if (adcMv) {
+        *adcMv = (uint16_t)(((uint32_t)rawAverage * ADCVREF) / 0xFFF);
+    }
+    if (scale) {
+        *scale = bucketScale;
+    }
+    if (offset) {
+        *offset = bucketOffset;
+    }
+
+    return true;
 }
 
 void powerMeterUpdate(timeUs_t timeDelta)

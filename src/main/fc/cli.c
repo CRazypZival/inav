@@ -4024,6 +4024,59 @@ static void cliStatus(char *cmdline)
     }
 }
 
+static void cliCurrRawRecord(char *cmdline)
+{
+    while (cmdline && *cmdline == ' ') {
+        cmdline++;
+    }
+
+    if (cmdline && *cmdline) {
+        if (sl_strcasecmp(cmdline, "reset") == 0) {
+            currentMeterRecordReset();
+            cliPrintLine("# CurrRawRecord reset");
+            return;
+        }
+        cliPrintErrorLine("Usage: currrawrecord [reset]");
+        return;
+    }
+
+    cliPrintLine("# CurrRawRecord");
+
+    const uint8_t maxBucket = currentMeterRecordGetMaxBucket();
+    bool any = false;
+    uint16_t maxRaw = 0;
+    uint16_t maxMv = 0;
+    uint16_t maxA = 0;
+    int16_t maxScale = 0;
+    int16_t maxOffset = 0;
+
+    for (uint8_t bucket = 1; bucket <= maxBucket; bucket++) {
+        uint16_t adcRaw = 0;
+        uint16_t adcMv = 0;
+        int16_t scale = 0;
+        int16_t offset = 0;
+        if (!currentMeterRecordGetBucket(bucket, &adcRaw, &adcMv, &scale, &offset)) {
+            continue;
+        }
+
+        const uint16_t binA = (uint16_t)bucket * 10;
+        cliPrintLinef("%uA  raw=%u  %umV (scale=%d,offset=%d)", binA, adcRaw, adcMv, scale, offset);
+        any = true;
+        maxA = binA;
+        maxRaw = adcRaw;
+        maxMv = adcMv;
+        maxScale = scale;
+        maxOffset = offset;
+    }
+
+    if (!any) {
+        cliPrintLine("# No ADC current records yet");
+        return;
+    }
+
+    cliPrintLinef("\"MAX\"A=%u  raw=%u  \"MAX\"mV=%u (scale=%d,offset=%d)", maxA, maxRaw, maxMv, maxScale, maxOffset);
+}
+
 static void cliTasks(char *cmdline)
 {
     UNUSED(cmdline);
@@ -4427,6 +4480,7 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("mode_color", "configure mode and special colors", NULL, cliModeColor),
 #endif
     CLI_COMMAND_DEF("cli_delay", "CLI Delay", "Delay in ms", cliDelay),
+    CLI_COMMAND_DEF("currrawrecord", "print recorded current ADC mV per 10A bin", "[reset]", cliCurrRawRecord),
     CLI_COMMAND_DEF("defaults", "reset to defaults and reboot", NULL, cliDefaults),
     CLI_COMMAND_DEF("dfu", "DFU mode on reboot", NULL, cliDfu),
     CLI_COMMAND_DEF("diff", "list configuration changes from default",

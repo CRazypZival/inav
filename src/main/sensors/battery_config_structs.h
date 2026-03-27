@@ -66,6 +66,17 @@ typedef struct batteryMetersConfig_s {
         currentSensor_e type;   // type of current meter used, either ADC or virtual
     } current;
 
+    struct {
+        uint8_t enabled;            // 0: single calibration, 1: dual calibration by ADC voltage
+        uint8_t lowUseCli;          // 1: low range uses current.scale/current.offset, 0: use lowScale/lowOffset
+        int16_t lowScale;           // low range scale, 0.1mV/A
+        int16_t lowOffset;          // low range offset, mV
+        uint32_t transitionUvStart; // ADC pin voltage start of blend window, uV
+        uint32_t transitionUvEnd;   // ADC pin voltage end of blend window, uV
+        int16_t highScale;          // high range scale, 0.1mV/A
+        int16_t highOffset;         // high range offset, mV
+    } currentDual;
+
     batVoltageSource_e voltageSource;
 
     uint32_t cruise_power;      // power drawn by the motor(s) at cruise throttle/speed (cW)

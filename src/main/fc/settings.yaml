@@ -921,6 +921,54 @@ groups:
         field: current.type
         table: current_sensor
         type: uint8_t
+      - name: current_meter_dual_calibration
+        description: "Enable dual current calibration by ADC pin voltage split (0=off, 1=on)."
+        default_value: :target
+        field: currentDual.enabled
+        min: 0
+        max: 1
+      - name: current_meter_dual_low_use_cli
+        description: "For low range: 1=use current_meter_scale/current_meter_offset, 0=use fixed low scale/offset below."
+        default_value: :target
+        field: currentDual.lowUseCli
+        min: 0
+        max: 1
+      - name: current_meter_low_scale
+        description: "Low-range current scale in 0.1 mV/A."
+        default_value: :target
+        field: currentDual.lowScale
+        min: -10000
+        max: 10000
+      - name: current_meter_low_offset
+        description: "Low-range current offset in mV."
+        default_value: :target
+        field: currentDual.lowOffset
+        min: -32768
+        max: 32767
+      - name: current_meter_dual_transition_uv_start
+        description: "ADC pin voltage (uV) where blend starts."
+        default_value: :target
+        field: currentDual.transitionUvStart
+        min: 0
+        max: 3300000
+      - name: current_meter_dual_transition_uv_end
+        description: "ADC pin voltage (uV) where blend ends."
+        default_value: :target
+        field: currentDual.transitionUvEnd
+        min: 0
+        max: 3300000
+      - name: current_meter_high_scale
+        description: "High-range current scale in 0.1 mV/A."
+        default_value: :target
+        field: currentDual.highScale
+        min: -10000
+        max: 10000
+      - name: current_meter_high_offset
+        description: "High-range current offset in mV."
+        default_value: :target
+        field: currentDual.highOffset
+        min: -32768
+        max: 32767
       - name: bat_voltage_src
         description: "Chose between raw and sag compensated battery voltage to use for battery alarms and telemetry. Possible values are `RAW` and `SAG_COMP`"
         default_value: "RAW"
