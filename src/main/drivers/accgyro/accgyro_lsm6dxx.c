@@ -51,6 +51,7 @@ typedef struct __attribute__ ((__packed__)) lsm6DContextData_s {
 #define LSM6DS3_CHIP_ID 0x69
 #define LSM6DSV16X_CHIP_ID 0x70
 #define LSM6DSV32X_CHIP_ID 0x65
+#define LSM6DSK320X_CHIP_ID 0x75
 
 static uint8_t lsm6dID = 0x6C;
 
@@ -172,7 +173,7 @@ static void lsm6dsv16xConfig(gyroDev_t *gyro)
 static void lsm6dxxConfig(gyroDev_t *gyro)
 { 
     // Dispatch to chip-specific configuration based on detected chip ID
-    if (lsm6dID == LSM6DSV16X_CHIP_ID || lsm6dID == LSM6DSV32X_CHIP_ID) {
+    if (lsm6dID == LSM6DSV16X_CHIP_ID || lsm6dID == LSM6DSV32X_CHIP_ID || lsm6dID == LSM6DSK320X_CHIP_ID) {
         lsm6dsv16xConfig(gyro);
         return;
     }
@@ -251,6 +252,7 @@ static bool lsm6dxxDetect(busDevice_t * dev)
             case LSM6DSL_CHIP_ID: 
             case LSM6DSV16X_CHIP_ID:
             case LSM6DSV32X_CHIP_ID:
+            case LSM6DSK320X_CHIP_ID:
                  lsm6dID = tmp;
                 // Compatible chip detected
                 return true;
@@ -273,7 +275,7 @@ static void lsm6dxxSpiAccInit(accDev_t *acc)
     // For LSM6DSV16X/LSM6DSV32X: ±16G sensor scale
     // ST官方转换因子: 0.488 mg/LSB for ±16g
     // INAV acc_1G格式: 1G = 1000mg, 所以 acc_1G = 1000/0.488 ≈ 2049
-    if (lsm6dID == LSM6DSV16X_CHIP_ID || lsm6dID == LSM6DSV32X_CHIP_ID) {
+    if (lsm6dID == LSM6DSV16X_CHIP_ID || lsm6dID == LSM6DSV32X_CHIP_ID || lsm6dID == LSM6DSK320X_CHIP_ID) {
         acc->acc_1G = 2049;   // LSM6DSV16X/LSM6DSV32X: 0.488 mg/LSB for ±16g
     } else {
         acc->acc_1G = 2048;   // LSM6DSO/DSL: 传统值
